@@ -1,0 +1,22 @@
+# Miscellaneous
+*.log
+*.swp
+.DS_Store
+.atom/
+.build/
+.history
+.svn/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# VS Code related
+.vscode/
+
+# Others
+.claude/
+.config/
+.dart_tool/
