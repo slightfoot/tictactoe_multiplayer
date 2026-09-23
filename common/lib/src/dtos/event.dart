@@ -61,3 +61,69 @@ final class PlayerLeftSessionEvent extends GameEvent {
     };
   }
 }
+
+final class GameStartedEvent extends GameEvent {
+  GameStartedEvent(super.sessionId);
+
+  @override
+  final type = DtoType.gameStartedEvent;
+
+  factory GameStartedEvent.fromJson(Map<String, Object?> json) {
+    return GameStartedEvent(SessionId(json['sessionId'] as String));
+  }
+}
+
+final class GameEndedEvent extends GameEvent {
+  GameEndedEvent(super.sessionId, this.winner);
+
+  final GamePlayer? winner;
+
+  @override
+  final type = DtoType.gameEndedEvent;
+
+  factory GameEndedEvent.fromJson(Map<String, Object?> json) {
+    return GameEndedEvent(
+      SessionId(json['sessionId'] as String),
+      json['winner'] != null ? GamePlayer.fromJson(json['winner'] as Map<String, Object?>) : null,
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() {
+    return {
+      ...super.toJson(),
+      if (winner != null) //
+        'winner': winner!.toJson(),
+    };
+  }
+}
+
+final class GameTurnEvent extends GameEvent {
+  GameTurnEvent(super.sessionId, this.playerId, this.row, this.col);
+
+  final PlayerId playerId;
+  final int row;
+  final int col;
+
+  @override
+  final type = DtoType.gameTurnEvent;
+
+  factory GameTurnEvent.fromJson(Map<String, Object?> json) {
+    return GameTurnEvent(
+      SessionId(json['sessionId'] as String),
+      PlayerId(json['playerId'] as String),
+      json['row'] as int,
+      json['col'] as int,
+    );
+  }
+
+  @override
+  Map<String, Object?> toJson() {
+    return {
+      ...super.toJson(),
+      'playerId': playerId.value,
+      'row': row,
+      'col': col,
+    };
+  }
+}

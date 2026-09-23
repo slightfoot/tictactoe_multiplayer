@@ -6,12 +6,17 @@ enum DtoType {
   createSessionResponse('CreateSessionResponse', CreateSessionResponse.fromJson),
   joinSessionRequest('JoinSessionRequest', JoinSessionRequest.fromJson),
   joinSessionResponse('JoinSessionResponse', JoinSessionResponse.fromJson),
+  startSessionRequest('StartSessionRequest', StartSessionRequest.fromJson),
+  startSessionResponse('StartSessionResponse', StartSessionResponse.fromJson),
   // commands.dart
-  gameCommandResponse('GameCommandResponse', GameCommandResponse.fromJson),
+  commandResponse('GameCommandResponse', CommandResponse.fromJson),
   gameCommandTurn('GameCommandTurn', GameCommandTurn.fromJson),
   // events.dart
+  gameStartedEvent('GameStartedEvent', GameStartedEvent.fromJson),
   playerJoinedSessionEvent('PlayerJoinedSessionEvent', PlayerJoinedSessionEvent.fromJson),
   playerLeftSessionEvent('PlayerLeftSessionEvent', PlayerLeftSessionEvent.fromJson),
+  gameEndedEvent('GameEndedEvent', GameEndedEvent.fromJson),
+  gameTurnEvent('GameTurnEvent', GameTurnEvent.fromJson),
   ;
 
   const DtoType(this.value, this.fromJson);

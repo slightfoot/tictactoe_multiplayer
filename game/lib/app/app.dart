@@ -10,6 +10,7 @@ class GameApp extends StatelessWidget {
     return MaterialApp(
       theme: ThemeData.dark(),
       home: Home(),
+      debugShowCheckedModeBanner: false,
     );
   }
 }

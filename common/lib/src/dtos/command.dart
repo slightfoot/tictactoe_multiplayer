@@ -1,17 +1,21 @@
 part of '../dtos.dart';
 
-final class GameCommandResponse extends DataTransferObject {
-  GameCommandResponse(this.id, this.success, this.error);
+final class CommandResponse extends DataTransferObject {
+  const CommandResponse._(this.id, this.success, this.error);
+
+  const CommandResponse.success(this.id) : success = true, error = null;
+
+  const CommandResponse.error(this.id, this.error) : success = false;
 
   final CommandId id;
   final bool success;
   final String? error;
 
   @override
-  final type = DtoType.gameCommandResponse;
+  final type = DtoType.commandResponse;
 
-  factory GameCommandResponse.fromJson(Map<String, Object?> json) {
-    return GameCommandResponse(
+  factory CommandResponse.fromJson(Map<String, Object?> json) {
+    return CommandResponse._(
       CommandId(json['id'] as String),
       json['success'] as bool,
       json['error'] as String?,
@@ -21,6 +25,7 @@ final class GameCommandResponse extends DataTransferObject {
   @override
   Map<String, Object?> toJson() {
     return {
+      ...super.toJson(),
       'id': id.value,
       'success': success,
       if (error != null) //
@@ -29,17 +34,29 @@ final class GameCommandResponse extends DataTransferObject {
   }
 }
 
-sealed class GameCommand extends DataTransferObject {
-  const GameCommand(this.id, this.sessionId);
+sealed class DtoCommand extends DataTransferObject {
+  const DtoCommand(this.id);
 
   final CommandId id;
-  final SessionId sessionId;
 
   @override
   Map<String, Object?> toJson() {
     return {
       ...super.toJson(),
       'id': id.value,
+    };
+  }
+}
+
+sealed class GameCommand extends DtoCommand {
+  const GameCommand(super.id, this.sessionId);
+
+  final SessionId sessionId;
+
+  @override
+  Map<String, Object?> toJson() {
+    return {
+      ...super.toJson(),
       'sessionId': sessionId.value,
     };
   }
@@ -49,12 +66,10 @@ final class GameCommandTurn extends GameCommand {
   GameCommandTurn(
     super.id,
     super.sessionId,
-    this.playerId,
     this.row,
     this.col,
   );
 
-  final PlayerId playerId;
   final int row;
   final int col;
 
@@ -65,7 +80,6 @@ final class GameCommandTurn extends GameCommand {
     return GameCommandTurn(
       CommandId(json['id'] as String),
       SessionId(json['sessionId'] as String),
-      PlayerId(json['playerId'] as String),
       json['row'] as int,
       json['col'] as int,
     );
@@ -75,7 +89,6 @@ final class GameCommandTurn extends GameCommand {
   Map<String, Object?> toJson() {
     return {
       ...super.toJson(),
-      'playerId': playerId.value,
       'row': row,
       'col': col,
     };
