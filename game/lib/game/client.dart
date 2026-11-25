@@ -45,75 +45,77 @@ class GameClient extends ChangeNotifier {
   GamePlayer get winner => _winner!;
 
   void _run() {
-    webSocket.messages.listen((message) {
-      if (message is! String) {
-        print('Expected string message, got $message');
-        return;
-      }
-      final dto = DataTransferObject.fromJson(json.decode(message));
-      print('Received from server: $dto');
-      switch (dto) {
-        case CreateSessionResponse(:final sessionId):
-          _session = GameSession(
-            id: sessionId,
-            owner: playerId,
-            players: [_player!],
-            state: SessionState.waiting,
-          );
-          notifyListeners();
-        case StartSessionResponse(:final board):
-          _session = _session!.copyWith(state: SessionState.playing);
-          _board = board;
-          notifyListeners();
-        case JoinSessionResponse(:final session, :final board):
-          _session = session;
-          _board = board;
-          notifyListeners();
-        case GameStartedEvent():
-          _session = _session!.copyWith(state: SessionState.playing);
-          notifyListeners();
-        case PlayerJoinedSessionEvent(:final player):
-          if (player.id != playerId) {
-            _session = _session!.copyWith(
-              players: [..._session!.players, player],
-            );
-            notifyListeners();
-          }
-        case PlayerLeftSessionEvent(:final playerId):
+    webSocket.messages.listen(_onMessage);
+  }
+
+  void _onMessage(Object? message) {
+    if (message is! String) {
+      print('Expected string message, got $message');
+      return;
+    }
+    final dto = DataTransferObject.fromJson(json.decode(message));
+    print('Received from server: $dto');
+    switch (dto) {
+      case CreateSessionResponse(:final sessionId):
+        _session = GameSession(
+          id: sessionId,
+          owner: playerId,
+          players: [_player!],
+          state: SessionState.waiting,
+        );
+        notifyListeners();
+      case StartSessionResponse(:final board):
+        _session = _session!.copyWith(state: SessionState.playing);
+        _board = board;
+        notifyListeners();
+      case JoinSessionResponse(:final session, :final board):
+        _session = session;
+        _board = board;
+        notifyListeners();
+      case GameStartedEvent():
+        _session = _session!.copyWith(state: SessionState.playing);
+        notifyListeners();
+      case PlayerJoinedSessionEvent(:final player):
+        if (player.id != playerId) {
           _session = _session!.copyWith(
-            players: _session!.players.where((p) => p.id != playerId).toList(),
+            players: [..._session!.players, player],
           );
           notifyListeners();
-        case GameTurnEvent(:final playerId, :final row, :final col):
-          final player = _session!.players.firstWhere((p) => p.id == playerId);
-          _board!.set(row, col, player.icon);
-          notifyListeners();
-        case GameEndedEvent():
-          _session = _session!.copyWith(state: SessionState.ended);
-          _winner = dto.winner;
-          notifyListeners();
-        default:
-          print('Unhandled DTO: $dto');
-          break;
-      }
-      if (dto is SessionResponse) {
-        final completer = _pendingCommands.remove(dto.id);
-        if (completer != null) {
-          completer.complete(dto);
         }
-      } else if (dto is CommandResponse) {
-        final completer = _pendingCommands.remove(dto.id);
-        if (completer != null) {
-          if (dto.success) {
-            completer.complete(dto);
-          } else {
-            completer.completeError(Exception(dto.error));
-          }
-        }
-      } else {
+      case PlayerLeftSessionEvent(:final playerId):
+        _session = _session!.copyWith(
+          players: _session!.players.where((p) => p.id != playerId).toList(),
+        );
+        notifyListeners();
+      case GameTurnEvent(:final playerId, :final row, :final col):
+        final player = _session!.players.firstWhere((p) => p.id == playerId);
+        _board!.set(row, col, player.icon);
+        notifyListeners();
+      case GameEndedEvent():
+        _session = _session!.copyWith(state: SessionState.ended);
+        _winner = dto.winner;
+        notifyListeners();
+      default:
         print('Unhandled DTO: $dto');
-      }
-    });
+        break;
+    }
+    if (dto is SessionResponse) {
+      _pendingCommands.remove(dto.id)?.complete(dto);
+      return;
+    }
+    if (dto is! CommandResponse) {
+      print('Unhandled DTO: $dto');
+      return;
+    }
+    final completer = _pendingCommands.remove(dto.id);
+    if (completer == null) {
+      return;
+    }
+    if (dto.success) {
+      completer.complete(dto);
+    } else {
+      completer.completeError(Exception(dto.error));
+    }
   }
 
   Future<T> sendCommand<T>(DtoCommand command) async {

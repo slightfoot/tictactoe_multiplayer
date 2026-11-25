@@ -102,97 +102,87 @@ class GameServer {
     }
   }
 
+  GameSession _requireSession(SessionId sessionId) {
+    final session = sessions[sessionId];
+    if (session == null) {
+      throw const ProtocolException('Session not found');
+    }
+    return session;
+  }
+
   Future<void> onDtoReceived(GameConnection connection, DataTransferObject dto) async {
     if (dto is! DtoCommand) {
       return;
     }
     try {
       switch (dto) {
-        case SessionCommand():
-          switch (dto) {
-            case CreateSessionRequest(:final id, :final player):
-              print('CreateSessionRequest: $dto');
-              if (player.id != connection.playerId) {
-                throw ProtocolException('Player id mismatch');
-              }
-              final session = GameSession(
-                id: SessionId(Uuid().v4()),
-                owner: connection.playerId,
-                players: [player],
-                state: SessionState.waiting,
-              );
-              sessions[session.id] = session;
-              games[session.id] = GameBoard.empty(5, 5);
-              connection.send(CreateSessionResponse(id, session.id));
-            case JoinSessionRequest(:final id, :final player):
-              print('JoinSessionRequest: $dto');
-              final session = sessions[dto.sessionId];
-              if (session == null) {
-                throw ProtocolException('Session not found');
-              }
-              // if (session.state != SessionState.waiting) {
-              //   throw ProtocolException('Session is not waiting');
-              // }
-              if (player.id != connection.playerId) {
-                throw ProtocolException('Player id mismatch');
-              }
-              session.players.add(dto.player);
-              final game = games[session.id]!;
-              connection.send(JoinSessionResponse(id, session, game));
-              sendToSession(
-                session.id,
-                PlayerJoinedSessionEvent(session.id, dto.player),
-              );
-            case StartSessionRequest(:final id):
-              print('StartSessionRequest: $dto');
-              final session = sessions[dto.sessionId];
-              if (session == null) {
-                throw ProtocolException('Session not found');
-              }
-              if (session.owner != connection.playerId) {
-                throw ProtocolException('Player is not the owner');
-              }
-              sessions[session.id] = session.copyWith(state: SessionState.playing);
-              sendToSession(
-                session.id,
-                GameStartedEvent(session.id),
-              );
-              final game = games[session.id]!;
-              connection.send(StartSessionResponse(id, session.id, game));
-            default:
-              throw UnsupportedError('SessionCommand: ${dto.type} not supported');
+        case CreateSessionRequest(:final id, :final player):
+          print('CreateSessionRequest: $dto');
+          if (player.id != connection.playerId) {
+            throw const ProtocolException('Player id mismatch');
           }
-
-        case GameCommand():
-          switch (dto) {
-            case GameCommandTurn():
-              print('GameCommandTurn: $dto');
-              final session = sessions[dto.sessionId];
-              if (session == null) {
-                throw ProtocolException('Session not found');
-              }
-              final game = games[session.id]!;
-              final player = session.players.firstWhere(
-                (player) => player.id == connection.playerId,
-              );
-              game.set(dto.row, dto.col, player.icon);
-              connection.send(CommandResponse.success(dto.id));
-              sendToSession(
-                session.id,
-                GameTurnEvent(session.id, player.id, dto.row, dto.col),
-              );
-              final icon = game.checkWinner();
-              if (icon != null) {
-                final winner = session.players.firstWhere(
-                  (player) => player.icon == icon,
-                );
-                sendToSession(
-                  session.id,
-                  GameEndedEvent(session.id, winner),
-                );
-              }
+          final session = GameSession(
+            id: SessionId(Uuid().v4()),
+            owner: connection.playerId,
+            players: [player],
+            state: SessionState.waiting,
+          );
+          sessions[session.id] = session;
+          games[session.id] = GameBoard.empty(5, 5);
+          connection.send(CreateSessionResponse(id, session.id));
+        case JoinSessionRequest(:final id, :final sessionId, :final player):
+          print('JoinSessionRequest: $dto');
+          final session = _requireSession(sessionId);
+          // if (session.state != SessionState.waiting) {
+          //   throw ProtocolException('Session is not waiting');
+          // }
+          if (player.id != connection.playerId) {
+            throw const ProtocolException('Player id mismatch');
           }
-        default:
+          session.players.add(player);
+          final game = games[session.id]!;
+          connection.send(JoinSessionResponse(id, session, game));
+          sendToSession(
+            session.id,
+            PlayerJoinedSessionEvent(session.id, player),
+          );
+        case StartSessionRequest(:final id, :final sessionId):
+          print('StartSessionRequest: $dto');
+          final session = _requireSession(sessionId);
+          if (session.owner != connection.playerId) {
+            throw const ProtocolException('Player is not the owner');
+          }
+          sessions[session.id] = session.copyWith(state: SessionState.playing);
+          sendToSession(
+            session.id,
+            GameStartedEvent(session.id),
+          );
+          final game = games[session.id]!;
+          connection.send(StartSessionResponse(id, session.id, game));
+        case GameCommandTurn(:final id, :final sessionId, :final row, :final col):
+          print('GameCommandTurn: $dto');
+          final session = _requireSession(sessionId);
+          final game = games[session.id]!;
+          final player = session.players.firstWhere(
+            (player) => player.id == connection.playerId,
+          );
+          game.set(row, col, player.icon);
+          connection.send(CommandResponse.success(id));
+          sendToSession(
+            session.id,
+            GameTurnEvent(session.id, player.id, row, col),
+          );
+          final icon = game.checkWinner();
+          if (icon != null) {
+            final winner = session.players.firstWhere(
+              (player) => player.icon == icon,
+            );
+            sendToSession(
+              session.id,
+              GameEndedEvent(session.id, winner),
+            );
+          }
+        case SessionResponse():
           throw UnsupportedError('DTO: ${dto.type} not supported');
       }
     } on ProtocolException catch (error, stackTrace) {
