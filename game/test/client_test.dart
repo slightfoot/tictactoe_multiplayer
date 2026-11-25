@@ -54,99 +54,133 @@ void main() {
     var notifications = 0;
     client.addListener(() => notifications++);
 
-    // Ignore non-String frames safely
-    serverWs.add(<int>[1, 2, 3]);
-    await pumpEventQueueTicks();
-    expect(notifications, 0);
-
+    // Ignore non-String frames, uncorrelated responses, and unhandled command DTOs safely
     client.createRandomPlayer();
-    final createFuture = client.createSession();
-    final createRaw = json.decode(await incoming.nextString()) as Map<String, Object?>;
+    serverWs.add(<int>[1, 2, 3]);
+    sendDto(serverWs, CreateSessionResponse(CommandId('orphan-session-resp'), SessionId('s-none')));
+    sendDto(serverWs, CommandResponse.success(CommandId('orphan-cmd-resp')));
+    sendDto(
+      serverWs,
+      CreateSessionRequest(
+        CommandId('unexpected-req'),
+        GamePlayer(id: PlayerId('p-x'), name: 'X', icon: 1),
+      ),
+    );
+    await pumpEventQueueTicks();
+
+    // After orphan CreateSessionResponse without _player, reset fresh client below; verify no crash
+    await serverWs.close();
+
+    final (freshClient, freshWs, freshIncoming) = await connectClient();
+    notifications = 0;
+    freshClient.addListener(() => notifications++);
+
+    // Precondition checks before joining a session
+    await expectLater(freshClient.startSession(), throwsException);
+    await expectLater(freshClient.playTurn(0, 0), throwsException);
+
+    freshClient.createRandomPlayer();
+    final createFuture = freshClient.createSession();
+    final createRaw = json.decode(await freshIncoming.nextString()) as Map<String, Object?>;
     final createReq = DataTransferObject.fromJson(createRaw) as CreateSessionRequest;
 
     final sessionId = SessionId('session-1');
-    sendDto(serverWs, CreateSessionResponse(createReq.id, sessionId));
+    sendDto(freshWs, CreateSessionResponse(createReq.id, sessionId));
     await createFuture;
-    expect(client.state, SessionState.waiting);
-    expect(client.session.id, sessionId);
+    expect(freshClient.state, SessionState.waiting);
+    expect(freshClient.session.id, sessionId);
     expect(notifications, 1);
+
+    // Precondition checks while already in a session
+    await expectLater(freshClient.createSession(), throwsException);
+    await expectLater(freshClient.joinSession(sessionId), throwsException);
+
+    // Uncorrelated CommandResponse and unhandled request DTO do not throw
+    sendDto(freshWs, CommandResponse.success(CommandId('untracked')));
+    sendDto(freshWs, StartSessionRequest(CommandId('unhandled-req'), sessionId));
 
     // Self join event is ignored; peer join event adds player
     sendDto(
-      serverWs,
+      freshWs,
       PlayerJoinedSessionEvent(
         sessionId,
-        GamePlayer(id: client.playerId, name: 'Self', icon: 10),
+        GamePlayer(id: freshClient.playerId, name: 'Self', icon: 10),
       ),
     );
     final rival = GamePlayer(id: PlayerId('p-rival'), name: 'Rival', icon: 99);
-    sendDto(serverWs, PlayerJoinedSessionEvent(sessionId, rival));
+    sendDto(freshWs, PlayerJoinedSessionEvent(sessionId, rival));
     await pumpEventQueueTicks();
-    expect(client.session.players, hasLength(2));
+    expect(freshClient.session.players, hasLength(2));
     expect(notifications, 2);
 
     // Start session response
-    final startFuture = client.startSession();
-    final startRaw = json.decode(await incoming.nextString()) as Map<String, Object?>;
+    final startFuture = freshClient.startSession();
+    final startRaw = json.decode(await freshIncoming.nextString()) as Map<String, Object?>;
     final startReq = DataTransferObject.fromJson(startRaw) as StartSessionRequest;
-    sendDto(serverWs, StartSessionResponse(startReq.id, sessionId, GameBoard.empty(5, 5)));
+    sendDto(freshWs, StartSessionResponse(startReq.id, sessionId, GameBoard.empty(5, 5)));
     await startFuture;
-    expect(client.state, SessionState.playing);
-    expect(client.board.rows, 5);
+    expect(freshClient.state, SessionState.playing);
+    expect(freshClient.board.rows, 5);
 
     // Play turn -> CommandResponse.success + GameTurnEvent
-    final turnFuture = client.playTurn(2, 3);
-    final turnRaw = json.decode(await incoming.nextString()) as Map<String, Object?>;
+    final turnFuture = freshClient.playTurn(2, 3);
+    final turnRaw = json.decode(await freshIncoming.nextString()) as Map<String, Object?>;
     final turnReq = DataTransferObject.fromJson(turnRaw) as GameCommandTurn;
-    sendDto(serverWs, CommandResponse.success(turnReq.id));
+    sendDto(freshWs, CommandResponse.success(turnReq.id));
     await turnFuture;
 
-    sendDto(serverWs, GameTurnEvent(sessionId, rival.id, 2, 3));
-    sendDto(serverWs, GameEndedEvent(sessionId, rival));
-    sendDto(serverWs, PlayerLeftSessionEvent(sessionId, rival.id));
+    sendDto(freshWs, GameTurnEvent(sessionId, rival.id, 2, 3));
+    sendDto(freshWs, GameEndedEvent(sessionId, rival));
+    sendDto(freshWs, PlayerLeftSessionEvent(sessionId, rival.id));
     await pumpEventQueueTicks();
 
-    expect(client.board.get(2, 3), 99);
-    expect(client.state, SessionState.ended);
-    expect(client.winner.id, rival.id);
-    expect(client.session.players.map((p) => p.id), [client.playerId]);
+    expect(freshClient.board.get(2, 3), 99);
+    expect(freshClient.state, SessionState.ended);
+    expect(freshClient.winner.id, rival.id);
+    expect(freshClient.session.players.map((p) => p.id), [freshClient.playerId]);
 
     // CommandResponse.error rejects pending command future
-    final failingTurn = client.playTurn(0, 0);
-    final failRaw = json.decode(await incoming.nextString()) as Map<String, Object?>;
+    final failingTurn = freshClient.playTurn(0, 0);
+    final failRaw = json.decode(await freshIncoming.nextString()) as Map<String, Object?>;
     final failReq = DataTransferObject.fromJson(failRaw) as GameCommandTurn;
-    sendDto(serverWs, CommandResponse.error(failReq.id, 'Invalid move'));
+    sendDto(freshWs, CommandResponse.error(failReq.id, 'Invalid move'));
     await expectLater(failingTurn, throwsException);
 
-    await serverWs.close();
+    await freshWs.close();
   });
 
-  test('joinSession and GameStartedEvent transition guest client', () async {
-    final (client, serverWs, incoming) = await connectClient();
-    final guest = GamePlayer(id: client.playerId, name: 'Guest', icon: 42);
-    client.setPlayer(guest);
+  test(
+    'joinSession, non-owner startSession guard, and GameStartedEvent transition guest client',
+    () async {
+      final (client, serverWs, incoming) = await connectClient();
+      final guest = GamePlayer(id: client.playerId, name: 'Guest', icon: 42);
+      client.setPlayer(guest);
 
-    final sessionId = SessionId('session-2');
-    final joinFuture = client.joinSession(sessionId);
-    final joinRaw = json.decode(await incoming.nextString()) as Map<String, Object?>;
-    final joinReq = DataTransferObject.fromJson(joinRaw) as JoinSessionRequest;
+      final sessionId = SessionId('session-2');
+      final joinFuture = client.joinSession(sessionId);
+      final joinRaw = json.decode(await incoming.nextString()) as Map<String, Object?>;
+      final joinReq = DataTransferObject.fromJson(joinRaw) as JoinSessionRequest;
 
-    final session = GameSession(
-      id: sessionId,
-      owner: PlayerId('owner-1'),
-      players: [guest],
-      state: SessionState.waiting,
-    );
-    sendDto(serverWs, JoinSessionResponse(joinReq.id, session, GameBoard.empty(5, 5)));
-    await joinFuture;
-    expect(client.state, SessionState.waiting);
+      final session = GameSession(
+        id: sessionId,
+        owner: PlayerId('owner-1'),
+        players: [guest],
+        state: SessionState.waiting,
+      );
+      sendDto(serverWs, JoinSessionResponse(joinReq.id, session, GameBoard.empty(5, 5)));
+      await joinFuture;
+      expect(client.state, SessionState.waiting);
 
-    sendDto(serverWs, GameStartedEvent(sessionId));
-    await pumpEventQueueTicks();
-    expect(client.state, SessionState.playing);
+      // Non-owner cannot start session
+      await expectLater(client.startSession(), throwsException);
 
-    await serverWs.close();
-  });
+      sendDto(serverWs, GameStartedEvent(sessionId));
+      await pumpEventQueueTicks();
+      expect(client.state, SessionState.playing);
+
+      await serverWs.close();
+    },
+  );
 }
 
 class StreamQueueLike {
